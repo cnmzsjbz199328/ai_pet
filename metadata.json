@@ -1,0 +1,6 @@
+{
+  "name": "Sprite Animator",
+  "description": "AI-powered character sprite sequence generator based on the Sprite Sequence Generator skill.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}
