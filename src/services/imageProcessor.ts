@@ -25,6 +25,10 @@ export class ImageProcessor {
     const frames: string[] = [];
     let allValid = true;
 
+    // Calculate actual frame dimensions from the source image
+    const actualFw = img.width / frameCount;
+    const actualFh = img.height;
+
     for (let i = 0; i < frameCount; i++) {
         const canvas = document.createElement('canvas');
         canvas.width = fw;
@@ -32,7 +36,8 @@ export class ImageProcessor {
         const ctx = canvas.getContext('2d');
         if (!ctx) continue;
 
-        ctx.drawImage(img, i * fw, 0, fw, fh, 0, 0, fw, fh);
+        // Scale and draw from source to destination frame
+        ctx.drawImage(img, i * actualFw, 0, actualFw, actualFh, 0, 0, fw, fh);
         
         // Apply Soft Chroma Key
         this.applyChromaKey(ctx, fw, fh);

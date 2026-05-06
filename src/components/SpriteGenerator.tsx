@@ -102,63 +102,80 @@ export default function SpriteGenerator() {
   const handleDownloadPackage = async () => {
     if (!compositeUrl) return;
 
-    const zip = new JSZip();
-    const folder = zip.folder(`pets/${name.replace(/\s+/g, '_') || 'pet'}`);
-    
-    if (!folder) return;
+    try {
+        const zip = new JSZip();
+        const petNameSlug = name.replace(/\s+/g, '_') || 'pet';
+        const folder = zip.folder(`pets/${petNameSlug}`);
+        
+        if (!folder) throw new Error("Could not create ZIP folder structure");
 
-    // 1. Spritesheet
-    const sheetBase64 = compositeUrl.split(',')[1];
-    folder.file("spritesheet.webp", sheetBase64, { base64: true });
+        // 1. Spritesheet
+        const sheetBase64 = compositeUrl.split(',')[1];
+        folder.file("spritesheet.webp", sheetBase64, { base64: true });
 
-    // 2. pet.json
-    const petJson = {
-        name: name || "Unnamed Pet",
-        frameSize: { width: PET_CONFIG.width, height: PET_CONFIG.height },
-        chromaKey: "#00FF00",
-        fps: 10,
-        animations: Object.keys(rows).map((key) => ({
-            state: key,
-            frameCount: rows[key].frames.length,
-            rowIndex: ['base', 'idle', 'running-right', 'running-left', 'waving', 'jumping', 'failed', 'review', 'sleeping'].indexOf(key),
-            loop: !['base', 'failed'].includes(key),
-            mirrored: key === 'running-left' && rows['running-right']?.imageUrl === rows[key].imageUrl
-        }))
-    };
-    folder.file("pet.json", JSON.stringify(petJson, null, 2));
-
-    // 3. QA Folder: review.json and contact-sheet
-    const qaFolder = folder.folder("qa");
-    if (qaFolder) {
-        const qaReport = {
-            metadata: {
-                timestamp: new Date().toISOString(),
-                petName: name || "Unnamed Pet",
-                totalRows: Object.keys(rows).length
-            },
-            results: Object.keys(rows).map(key => ({
+        // 2. pet.json
+        const petJson = {
+            name: name || "Unnamed Pet",
+            frameSize: { width: PET_CONFIG.width, height: PET_CONFIG.height },
+            chromaKey: "#00FF00",
+            fps: 10,
+            animations: Object.keys(rows).map((key) => ({
                 state: key,
-                isValid: rows[key].isValid,
-                error: rows[key].error || null
+                frameCount: rows[key].frames.length,
+                rowIndex: ['base', 'idle', 'running-right', 'running-left', 'waving', 'jumping', 'failed', 'review', 'sleeping'].indexOf(key),
+                loop: !['base', 'failed'].includes(key),
+                mirrored: key === 'running-left' && rows['running-right']?.imageUrl === rows[key].imageUrl
             }))
         };
-        qaFolder.file("review.json", JSON.stringify(qaReport, null, 2));
-        
-        // Generate labeled contact sheet
-        const frameMap: Record<string, string[]> = {};
-        Object.keys(rows).forEach(key => {
-            frameMap[key] = rows[key].frames;
-        });
-        const contactSheetUrl = await ImageProcessor.generateContactSheet(frameMap);
-        const contactBase64 = contactSheetUrl.split(',')[1];
-        qaFolder.file("contact-sheet.webp", contactBase64, { base64: true });
-    }
+        folder.file("pet.json", JSON.stringify(petJson, null, 2));
 
-    const content = await zip.generateAsync({ type: "blob" });
-    const link = document.createElement("a");
-    link.href = URL.createObjectURL(content);
-    link.download = `${name.replace(/\s+/g, '_') || 'pet'}_package.zip`;
-    link.click();
+        // 3. QA Folder: review.json and contact-sheet
+        const qaFolder = folder.folder("qa");
+        if (qaFolder) {
+            const qaReport = {
+                metadata: {
+                    timestamp: new Date().toISOString(),
+                    petName: name || "Unnamed Pet",
+                    totalRows: Object.keys(rows).length
+                },
+                results: Object.keys(rows).map(key => ({
+                    state: key,
+                    isValid: rows[key].isValid,
+                    error: rows[key].error || null
+                }))
+            };
+            qaFolder.file("review.json", JSON.stringify(qaReport, null, 2));
+            
+            // Generate labeled contact sheet (wrap in sub-try to not block main zip)
+            try {
+                const frameMap: Record<string, string[]> = {};
+                Object.keys(rows).forEach(key => {
+                    frameMap[key] = rows[key].frames;
+                });
+                const contactSheetUrl = await ImageProcessor.generateContactSheet(frameMap);
+                const contactBase64 = contactSheetUrl.split(',')[1];
+                qaFolder.file("contact-sheet.webp", contactBase64, { base64: true });
+            } catch (qaErr) {
+                console.error("QA Contact sheet generation failed", qaErr);
+            }
+        }
+
+        const content = await zip.generateAsync({ type: "blob" });
+        const link = document.createElement("a");
+        link.href = URL.createObjectURL(content);
+        link.download = `${petNameSlug}_package.zip`;
+        
+        // Append to DOM to ensure click works in all environments
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        
+        // Cleanup
+        setTimeout(() => URL.revokeObjectURL(link.href), 100);
+    } catch (error) {
+        console.error("Export failed:", error);
+        alert("Failed to export bundle. Please try again.");
+    }
   };
 
   return (
