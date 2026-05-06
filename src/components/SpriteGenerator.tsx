@@ -117,7 +117,7 @@ export default function SpriteGenerator() {
         frameSize: { width: PET_CONFIG.width, height: PET_CONFIG.height },
         chromaKey: "#00FF00",
         fps: 10,
-        animations: Object.keys(rows).map((key, index) => ({
+        animations: Object.keys(rows).map((key) => ({
             state: key,
             frameCount: rows[key].frames.length,
             rowIndex: ['base', 'idle', 'running-right', 'running-left', 'waving', 'jumping', 'failed', 'review', 'sleeping'].indexOf(key),
@@ -126,6 +126,28 @@ export default function SpriteGenerator() {
         }))
     };
     folder.file("pet.json", JSON.stringify(petJson, null, 2));
+
+    // 3. QA Folder: review.json and contact-sheet
+    const qaFolder = folder.folder("qa");
+    if (qaFolder) {
+        const qaReport = {
+            metadata: {
+                timestamp: new Date().toISOString(),
+                petName: name || "Unnamed Pet",
+                totalRows: Object.keys(rows).length
+            },
+            results: Object.keys(rows).map(key => ({
+                state: key,
+                isValid: rows[key].isValid,
+                error: rows[key].error || null
+            }))
+        };
+        qaFolder.file("review.json", JSON.stringify(qaReport, null, 2));
+        
+        // Also include the composite atlas as a contact sheet inside QA
+        const contactBase64 = compositeUrl.split(',')[1];
+        qaFolder.file("contact-sheet.webp", contactBase64, { base64: true });
+    }
 
     const content = await zip.generateAsync({ type: "blob" });
     const link = document.createElement("a");
@@ -156,9 +178,11 @@ export default function SpriteGenerator() {
                         <div 
                           key={r.state} 
                           className={`w-4 h-4 rounded flex items-center justify-center transition-all ${
-                            rows[r.state] ? 'bg-amber-500 text-white' : 'bg-gray-100 text-gray-400 border border-gray-200'
+                            rows[r.state] 
+                              ? rows[r.state].isValid ? 'bg-amber-500 text-white' : 'bg-red-500 text-white animate-pulse'
+                              : 'bg-gray-100 text-gray-400 border border-gray-200'
                           }`}
-                          title={r.label}
+                          title={r.label + (rows[r.state]?.error ? `: ${rows[r.state].error}` : '')}
                         >
                           {i + 1}
                         </div>
