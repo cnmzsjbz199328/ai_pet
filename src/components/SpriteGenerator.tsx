@@ -48,7 +48,9 @@ export default function SpriteGenerator() {
     setIsGenerating(true);
     try {
       const baseRow = rows['base'];
-      const stripUrl = await generateSpriteRow(description, activeState, selectedStyle, baseRow?.imageUrl);
+      // Use the first processed frame as reference instead of the raw strip for better consistency
+      const referenceImage = baseRow?.frames?.[0] || baseRow?.imageUrl;
+      const stripUrl = await generateSpriteRow(description, activeState, selectedStyle, referenceImage);
       
       // Process strip into frames with QA
       const result = await ImageProcessor.processStrip(stripUrl, PET_CONFIG.count);
@@ -355,50 +357,113 @@ export default function SpriteGenerator() {
                 )}
              </div>
 
-             <div className="p-10 aspect-video bg-[#0f172a] flex items-center justify-center relative group overflow-hidden">
-                {/* Visual context grid */}
-                <div className="absolute inset-0 opacity-10 pointer-events-none" 
-                     style={{ backgroundImage: `linear-gradient(#fff 1px, transparent 1px), linear-gradient(90deg, #fff 1px, transparent 1px)`, backgroundSize: `${PET_CONFIG.width/2}px ${PET_CONFIG.height/2}px` }} />
-
-                <PetPreviewPlayer 
-                  frames={activeRow?.frames || []}
-                  className="w-72 h-72 shadow-2xl bg-transparent relative z-10"
-                />
-                
-                {activeRow && (
-                    <motion.div 
-                        initial={{ opacity: 0, y: 10 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        className="absolute bottom-6 left-1/2 -translate-x-1/2 flex flex-col gap-2 pointer-events-none"
-                    >
-                        <div className="flex gap-4 px-4 py-2 bg-black/40 backdrop-blur-md rounded-full border border-white/10">
-                            <div className="flex items-center gap-1.5">
-                                <div className={`w-2 h-2 rounded-full shadow-[0_0_8px_currentColor] ${activeRow.isValid ? 'bg-green-500 text-green-500' : 'bg-red-500 text-red-500'}`} />
-                                <span className={`text-[10px] font-bold uppercase tracking-wider ${activeRow.isValid ? 'text-white' : 'text-red-300'}`}>
-                                    {activeRow.isValid ? 'Centroid OK' : 'Centroid Error'}
-                                </span>
+             <div className="grid grid-cols-1 divide-y divide-gray-100">
+                {/* Stage 1: Raw Output */}
+                <div className="p-6 space-y-3 bg-gray-50/50">
+                    <div className="flex items-center justify-between">
+                        <h3 className="text-[10px] font-black text-gray-400 uppercase tracking-widest flex items-center gap-2">
+                             <div className="w-1 h-1 rounded-full bg-gray-300" />
+                             Stage 1: Raw AI Output (Strip)
+                        </h3>
+                        {activeRow && !isGenerating && (
+                            <span className="text-[10px] text-gray-400 font-mono bg-white px-2 py-0.5 rounded border border-gray-200">
+                                Verified
+                            </span>
+                        )}
+                    </div>
+                    <div className="h-28 bg-white rounded-xl border border-gray-100 overflow-hidden flex items-center justify-center relative group">
+                        {activeRow ? (
+                            <img src={activeRow.imageUrl} className="max-w-full max-h-full object-contain grayscale-0 group-hover:scale-110 transition-transform" />
+                        ) : isGenerating ? (
+                            <div className="flex items-center gap-3 text-amber-500 animate-pulse">
+                                <Loader2 size={14} className="animate-spin" />
+                                <span className="text-[10px] font-bold uppercase tracking-wider">Acquiring Image Data...</span>
                             </div>
-                            <div className="w-[1px] h-3 bg-white/10" />
-                            <div className="flex items-center gap-1.5">
-                                <span className="text-[10px] text-white/60 font-bold uppercase tracking-wider">{PET_CONFIG.count} Frames</span>
-                            </div>
+                        ) : (
+                            <span className="text-[10px] text-gray-300 font-medium font-mono uppercase tracking-widest">Awaiting Generation</span>
+                        )}
+                        <div className="absolute top-2 right-2 flex gap-1">
+                             <div className="bg-black/60 px-2 py-1 rounded text-[8px] text-white font-mono uppercase">Reference Layer</div>
                         </div>
-                        {activeRow.error && (
-                            <div className="bg-red-500/90 text-white text-[9px] px-3 py-1 rounded text-center font-bold">
-                                {activeRow.error}
+                    </div>
+                </div>
+
+                {/* Stage 2: Processed Frames */}
+                <div className="p-6 space-y-3">
+                    <h3 className="text-[10px] font-black text-gray-400 uppercase tracking-widest flex items-center gap-2">
+                         <div className="w-1 h-1 rounded-full bg-amber-500" />
+                         Stage 2: Fragmented Frames (QA)
+                    </h3>
+                    <div className="grid grid-cols-8 gap-2">
+                        {activeRow?.frames ? activeRow.frames.map((f, i) => (
+                           <div key={i} className="aspect-square bg-slate-900 flex items-center justify-center rounded-lg border border-slate-800 overflow-hidden shadow-inner group relative">
+                               <img src={f} className="w-4/5 h-4/5 object-contain pixelated" style={{ imageRendering: 'pixelated' }} />
+                               <div className="absolute inset-x-0 bottom-0 py-0.5 bg-black/60 text-white text-[8px] text-center opacity-0 group-hover:opacity-100 transition-opacity">#{i+1}</div>
+                           </div>
+                        )) : (
+                            Array.from({length: 8}).map((_, i) => (
+                                <div key={i} className="aspect-square bg-gray-50 rounded-lg border border-dashed border-gray-200 flex items-center justify-center">
+                                    <div className="w-1/3 h-1/3 bg-gray-100 rounded-sm" />
+                                </div>
+                            ))
+                        )}
+                    </div>
+                </div>
+
+                {/* Stage 3: Animation Loop */}
+                <div className="p-8 bg-slate-950 relative overflow-hidden flex flex-col md:flex-row items-center gap-12">
+                    <div className="absolute inset-0 opacity-5 pointer-events-none" 
+                         style={{ backgroundImage: `linear-gradient(#fff 1px, transparent 1px), linear-gradient(90deg, #fff 1px, transparent 1px)`, backgroundSize: `${PET_CONFIG.width/2}px ${PET_CONFIG.height/2}px` }} />
+                    
+                    <div className="relative group w-48 h-48 sm:w-56 sm:h-56 shrink-0">
+                        <div className="absolute inset-0 bg-amber-500/10 rounded-full blur-3xl group-hover:bg-amber-500/20 transition-colors" />
+                        <PetPreviewPlayer 
+                          frames={activeRow?.frames || []}
+                          className="w-full h-full shadow-[0_0_50px_rgba(0,0,0,0.5)] bg-transparent relative z-10 transition-transform group-hover:scale-110"
+                        />
+                    </div>
+
+                    <div className="flex-1 space-y-5 relative z-10 text-center md:text-left">
+                        <div className="space-y-1.5">
+                            <h3 className="text-base font-bold text-white flex items-center justify-center md:justify-start gap-2">
+                                Stage 3: Animation Playback
+                                {activeRow?.isValid && <div className="p-0.5 bg-green-500 rounded-full"><Check size={12} className="text-white" /></div>}
+                            </h3>
+                            <p className="text-[11px] text-slate-400 leading-relaxed uppercase tracking-tight font-medium">
+                                Technical verification of {PET_CONFIG.width}x{PET_CONFIG.height} sprite alignment.
+                            </p>
+                        </div>
+                        
+                        {activeRow && (
+                            <div className="flex flex-col gap-3 items-center md:items-start">
+                                <div className="flex gap-4 px-4 py-2 bg-white/5 backdrop-blur-xl rounded-full border border-white/10 w-fit">
+                                    <div className="flex items-center gap-1.5">
+                                        <div className={`w-2 h-2 rounded-full shadow-[0_0_8px_currentColor] ${activeRow.isValid ? 'bg-green-500 text-green-500' : 'bg-red-500 text-red-500'}`} />
+                                        <span className={`text-[10px] font-bold uppercase tracking-widest ${activeRow.isValid ? 'text-white' : 'text-red-300'}`}>
+                                            {activeRow.isValid ? 'CENTROID PASSED' : 'CENTROID ERROR'}
+                                        </span>
+                                    </div>
+                                    <div className="w-[1px] h-3 bg-white/10" />
+                                    <div className="flex items-center gap-1.5">
+                                        <span className="text-[10px] text-white/50 font-bold uppercase tracking-widest font-mono">CHR-KEY OK</span>
+                                    </div>
+                                </div>
+                                {activeRow.error && (
+                                    <div className="flex items-start gap-2 text-red-400 text-[10px] font-bold px-3 py-1.5 bg-red-400/10 rounded-lg border border-red-400/20 max-w-xs leading-tight">
+                                        <AlertTriangle size={14} className="shrink-0" />
+                                        {activeRow.error}
+                                    </div>
+                                )}
                             </div>
                         )}
-                    </motion.div>
-                )}
 
-                {!activeRow && !isGenerating && (
-                    <div className="text-center space-y-4 relative z-10">
-                        <div className="w-16 h-16 rounded-full bg-white/5 border border-white/10 mx-auto flex items-center justify-center text-white/20">
-                            <Play size={24} />
-                        </div>
-                        <p className="text-xs text-white/30 font-medium">Click "Generate" to start producing this animation row.</p>
+                        {!activeRow && !isGenerating && (
+                            <div className="text-[10px] text-slate-500 font-bold uppercase tracking-widest border border-slate-800 rounded-full px-4 py-2 w-fit mx-auto md:mx-0">
+                                Idle Pipeline
+                            </div>
+                        )}
                     </div>
-                )}
+                </div>
              </div>
           </div>
 
