@@ -3,136 +3,184 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useState } from "react";
-import { Sparkles, Play, Sword, Footprints, Egg, Coffee, Loader2, Download, Lock, Check, Trash2 } from "lucide-react";
+import { useState, useMemo } from "react";
+import { Sparkles, Play, Sword, Footprints, Box, Coffee, Loader2, Download, Lock, Check, Trash2, RotateCcw, AlertTriangle } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
-import { AnimationType, SpriteAsset } from "../types";
-import { generateSpritePrompt, generateSpriteImage } from "../services/geminiService";
-import SpritePreview from "./SpritePreview";
+import { AnimationState, PET_CONFIG, SpriteRow } from "../types";
+import { generateSpriteRow } from "../services/geminiService";
+import { ImageProcessor } from "../services/imageProcessor";
+import PetPreviewPlayer from "./PetPreviewPlayer";
 
-const ANIMATIONS: { type: AnimationType; icon: any; label: string }[] = [
-  { type: 'hatch', icon: Egg, label: 'Hatch' },
-  { type: 'walk', icon: Footprints, label: 'Walk' },
-  { type: 'attack', icon: Sword, label: 'Attack' },
-  { type: 'transform', icon: Sparkles, label: 'Transform' },
-  { type: 'rest', icon: Coffee, label: 'Rest' },
+const ANIMATION_ROWS: { state: AnimationState; label: string; icon: any }[] = [
+  { state: 'base', label: '1. Base Design', icon: Box },
+  { state: 'idle', label: '2. Idle', icon: Coffee },
+  { state: 'running-right', label: '3. Run Right', icon: Footprints },
+  { state: 'running-left', label: '4. Run Left', icon: Footprints },
+  { state: 'waving', label: '5. Waving', icon: Sparkles },
+  { state: 'jumping', label: '6. Jumping', icon: Play },
+  { state: 'failed', label: '7. Failed', icon: AlertTriangle },
+  { state: 'review', label: '8. Review', icon: RotateCcw },
+  { state: 'sleeping', label: '9. Sleeping', icon: Coffee },
 ];
 
-const STYLES = ["Pixel Art", "Anime", "Cartoon", "Realistic", "Sketch", "3D Render"];
+const STYLES = ["Pixel Art", "Anime", "Cartoon", "3D Render"];
 
 export default function SpriteGenerator() {
+  const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [selectedStyle, setSelectedStyle] = useState("Pixel Art");
   const [isGenerating, setIsGenerating] = useState(false);
-  const [assets, setAssets] = useState<SpriteAsset[]>([]);
-  const [activeTab, setActiveTab] = useState<AnimationType>('walk');
-  const [baseCharacter, setBaseCharacter] = useState<string | null>(null);
+  const [activeState, setActiveState] = useState<AnimationState>('base');
+  
+  const [rows, setRows] = useState<Record<string, SpriteRow>>({});
+  const [compositeUrl, setCompositeUrl] = useState<string | null>(null);
 
-  const handleGenerate = async () => {
+  const activeRow = useMemo(() => rows[activeState], [rows, activeState]);
+
+  const handleGenerateRow = async () => {
     if (!description || isGenerating) return;
 
     setIsGenerating(true);
     try {
-      const prompt = await generateSpritePrompt(description, activeTab, selectedStyle, 4);
-      const imageUrl = await generateSpriteImage(prompt, baseCharacter || undefined);
+      const baseRow = rows['base'];
+      const stripUrl = await generateSpriteRow(description, activeState, selectedStyle, baseRow?.imageUrl);
+      
+      // Process strip into frames
+      const frames = await ImageProcessor.processStrip(stripUrl, PET_CONFIG.count);
 
-      const newAsset: SpriteAsset = {
-        id: crypto.randomUUID(),
-        characterDescription: description,
-        animationType: activeTab,
-        style: selectedStyle,
-        imageUrl: imageUrl,
-        frameCount: 4,
+      const newRow: SpriteRow = {
+        state: activeState,
+        imageUrl: stripUrl,
+        frames: frames,
+        isValid: true
       };
 
-      setAssets([newAsset, ...assets]);
-      
-      // Automatically set the first generated asset as base if none exists
-      if (!baseCharacter) {
-        setBaseCharacter(imageUrl);
-      }
+      setRows(prev => ({ ...prev, [activeState]: newRow }));
     } catch (error) {
       console.error("Generation failed:", error);
-      alert("Failed to generate sprite. Please check your API key or try again.");
+      alert("Failed to generate row. Try again or check the documentation.");
     } finally {
       setIsGenerating(false);
     }
   };
 
-  const handleDownload = (imageUrl: string, name: string) => {
-    const link = document.createElement("a");
-    link.href = imageUrl;
-    link.download = `sprite_${name}_${Date.now()}.png`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+  const handleAssembleAtlas = async () => {
+    const frameMap: Record<string, string[]> = {};
+    Object.keys(rows).forEach(key => {
+        frameMap[key] = rows[key].frames;
+    });
+
+    try {
+        const atlas = await ImageProcessor.assembleAtlas(frameMap);
+        setCompositeUrl(atlas);
+    } catch (error) {
+        console.error("Assembly failed:", error);
+    }
+  };
+
+  const handleDownloadPackage = () => {
+    if (!compositeUrl) return;
+
+    // 1. Download Spritesheet
+    const sheetLink = document.createElement("a");
+    sheetLink.href = compositeUrl;
+    sheetLink.download = `${name.replace(/\s+/g, '_') || 'pet'}_spritesheet.webp`;
+    sheetLink.click();
+
+    // 2. Download pet.json
+    const petJson = {
+        name: name || "Unnamed Pet",
+        frameSize: { width: PET_CONFIG.width, height: PET_CONFIG.height },
+        animations: Object.keys(rows).map(key => ({
+            state: key,
+            frameCount: rows[key].frames.length
+        }))
+    };
+    
+    const blob = new Blob([JSON.stringify(petJson, null, 2)], { type: "application/json" });
+    const jsonLink = document.createElement("a");
+    jsonLink.href = URL.createObjectURL(blob);
+    jsonLink.download = "pet.json";
+    jsonLink.click();
   };
 
   return (
-    <div className="max-w-6xl mx-auto p-6 space-y-8">
-      <header className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+    <div className="max-w-7xl mx-auto p-6 space-y-8 pb-20">
+      <header className="flex flex-col md:flex-row md:items-center justify-between gap-6 border-b border-gray-100 pb-8">
         <div className="space-y-2">
           <h1 className="text-4xl font-bold tracking-tight text-gray-900 flex items-center gap-3">
-            <Sparkles className="text-amber-500 w-8 h-8" />
-            Sprite Animator Pro
+            <Box className="text-amber-500 w-10 h-10" />
+            Hatch-Pet Factory
           </h1>
-          <p className="text-gray-500 max-w-xl">
-            Character-consistent sprite generator. Lock your base design to ensure all animations match perfectly.
+          <p className="text-gray-500 max-w-xl text-sm">
+             Professional character sprite production system. 9-row standard spritesheet generator with technical alignment.
           </p>
         </div>
-        
-        {baseCharacter && (
-          <motion.div 
-            initial={{ opacity: 0, x: 20 }}
-            animate={{ opacity: 1, x: 0 }}
-            className="flex items-center gap-3 bg-white p-2 pr-4 rounded-full border border-amber-200 shadow-sm"
-          >
-            <div className="w-10 h-10 rounded-full overflow-hidden border border-amber-100 bg-gray-50">
-              <img src={baseCharacter} alt="Reference" className="w-full h-full object-cover" />
+
+        <div className="flex items-center gap-6">
+            <div className="text-right">
+                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Row Progress</p>
+                <div className="flex gap-1 mt-1 font-mono text-[10px] items-center">
+                    {ANIMATION_ROWS.map((r, i) => (
+                        <div 
+                          key={r.state} 
+                          className={`w-4 h-4 rounded flex items-center justify-center transition-all ${
+                            rows[r.state] ? 'bg-amber-500 text-white' : 'bg-gray-100 text-gray-400 border border-gray-200'
+                          }`}
+                          title={r.label}
+                        >
+                          {i + 1}
+                        </div>
+                    ))}
+                </div>
             </div>
-            <div>
-              <p className="text-[10px] font-bold text-amber-600 uppercase">Design Locked</p>
-              <button 
-                onClick={() => setBaseCharacter(null)}
-                className="text-[10px] text-gray-400 hover:text-red-500 underline"
-              >
-                Reset Reference
-              </button>
-            </div>
-            <Lock size={14} className="text-amber-500 ml-2" />
-          </motion.div>
-        )}
+            <button 
+                onClick={handleAssembleAtlas}
+                disabled={Object.keys(rows).length === 0}
+                className="px-6 py-3 bg-gray-900 text-white rounded-xl font-bold text-sm hover:bg-gray-800 disabled:opacity-30 transition-all shadow-lg shadow-gray-200"
+            >
+                Preview Atlas
+            </button>
+        </div>
       </header>
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-        {/* Configuration Panel */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+        {/* Step-by-Step Configuration */}
         <div className="lg:col-span-4 space-y-6">
-          <div className="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm space-y-6 sticky top-6">
+          <div className="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm space-y-6 lg:sticky lg:top-6">
             <div className="space-y-4">
-              <label className="text-sm font-semibold uppercase tracking-wider text-gray-400">
-                1. Character Description
-              </label>
-              <textarea
+               <label className="text-xs font-bold uppercase tracking-wider text-gray-400 flex items-center gap-2">
+                 <div className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                 Pet Identity
+               </label>
+               <input 
+                 value={name}
+                 onChange={(e) => setName(e.target.value)}
+                 className="w-full px-4 py-3 bg-gray-50 border border-gray-100 rounded-xl focus:ring-2 focus:ring-amber-500 outline-none transition-all placeholder:text-gray-300"
+                 placeholder="Character Name"
+               />
+               <textarea
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
-                placeholder="Describe your character traits..."
-                className="w-full h-32 p-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-amber-500 focus:border-transparent transition-all outline-none resize-none"
+                placeholder="Visual description (e.g. A neon blue jelly blob with tiny wings...)"
+                className="w-full h-28 p-4 bg-gray-50 border border-gray-100 rounded-xl focus:ring-2 focus:ring-amber-500 transition-all outline-none resize-none text-sm placeholder:text-gray-300"
               />
             </div>
 
             <div className="space-y-4">
-              <label className="text-sm font-semibold uppercase tracking-wider text-gray-400">
-                2. Visual Style
+              <label className="text-xs font-bold uppercase tracking-wider text-gray-400 flex items-center gap-2">
+                <div className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                Production Style
               </label>
               <div className="grid grid-cols-2 gap-2">
                 {STYLES.map((style) => (
                   <button
                     key={style}
                     onClick={() => setSelectedStyle(style)}
-                    className={`px-3 py-2 text-sm rounded-lg border transition-all ${
+                    className={`px-3 py-2 text-xs rounded-lg border transition-all ${
                       selectedStyle === style
-                        ? "bg-amber-100 border-amber-300 text-amber-900 font-medium"
-                        : "bg-white border-gray-200 text-gray-600 hover:border-amber-200"
+                        ? "bg-amber-50 border-amber-300 text-amber-900 font-bold"
+                        : "bg-white border-gray-100 text-gray-400 hover:border-amber-200"
                     }`}
                   >
                     {style}
@@ -141,166 +189,165 @@ export default function SpriteGenerator() {
               </div>
             </div>
 
-            <div className="space-y-4">
-              <label className="text-sm font-semibold uppercase tracking-wider text-gray-400">
-                3. Choose Action
+            <div className="space-y-3">
+              <label className="text-xs font-bold uppercase tracking-wider text-gray-400 flex items-center gap-2">
+                <div className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                Select Frame Row
               </label>
-              <div className="flex flex-wrap gap-2">
-                {ANIMATIONS.map(({ type, icon: Icon, label }) => (
+              <div className="grid grid-cols-1 gap-2 max-h-[300px] overflow-y-auto pr-1 custom-scrollbar">
+                {ANIMATION_ROWS.map(({ state, label, icon: Icon }) => (
                   <button
-                    key={type}
-                    onClick={() => setActiveTab(type)}
-                    className={`flex items-center gap-2 px-4 py-2 rounded-xl border transition-all ${
-                      activeTab === type
-                        ? "bg-gray-900 border-gray-900 text-white"
-                        : "bg-white border-gray-200 text-gray-600 hover:bg-gray-50"
+                    key={state}
+                    onClick={() => setActiveState(state)}
+                    className={`flex items-center justify-between p-3 rounded-xl border transition-all ${
+                      activeState === state
+                        ? "bg-amber-500 border-amber-500 text-white shadow-md"
+                        : "bg-white border-gray-100 text-gray-500 hover:bg-gray-50 hover:border-amber-100"
                     }`}
                   >
-                    <Icon size={16} />
-                    <span className="text-sm font-medium">{label}</span>
+                    <div className="flex items-center gap-3">
+                        <Icon size={14} className={activeState === state ? "text-amber-100" : "text-gray-300"} />
+                        <span className="text-xs font-bold">{label}</span>
+                    </div>
+                    {rows[state] && (
+                        <div className={`p-1 rounded-full ${activeState === state ? 'bg-amber-400' : 'bg-amber-50'}`}>
+                            <Check size={10} className={activeState === state ? "text-white" : "text-amber-500"} />
+                        </div>
+                    )}
                   </button>
                 ))}
               </div>
             </div>
 
             <button
-              onClick={handleGenerate}
+              onClick={handleGenerateRow}
               disabled={!description || isGenerating}
-              className="w-full py-4 bg-amber-500 hover:bg-amber-600 disabled:bg-gray-200 disabled:cursor-not-allowed text-white font-bold rounded-xl shadow-lg shadow-amber-200 flex items-center justify-center gap-2 transition-all active:scale-95"
+              className="w-full py-4 bg-gray-900 text-white font-bold rounded-xl shadow-lg border border-gray-800 flex items-center justify-center gap-3 hover:bg-black disabled:bg-gray-50 disabled:text-gray-300 transition-all active:scale-[0.98]"
             >
               {isGenerating ? (
                 <>
-                  <Loader2 className="animate-spin" />
-                  Drawing...
+                  <Loader2 className="animate-spin" size={18} />
+                  Drawing Row...
                 </>
               ) : (
                 <>
-                  {baseCharacter ? <Sparkles size={18} /> : <Play size={18} fill="currentColor" />}
-                  {baseCharacter ? "Generate Action" : "Create Base Character"}
+                  <Sparkles size={18} />
+                  {rows[activeState] ? "Redraw Row" : `Generate ${activeState}`}
                 </>
               )}
             </button>
-
-            {baseCharacter && (
-              <p className="text-[10px] text-center text-gray-400 italic">
-                Using current reference image for character consistency.
-              </p>
-            )}
           </div>
         </div>
 
-        {/* Assets Feed */}
-        <div className="lg:col-span-8">
-          <div className="bg-gray-50/50 rounded-2xl border border-gray-200 p-6 min-h-[600px] space-y-6">
-            <div className="flex items-center justify-between">
-              <h2 className="text-lg font-semibold text-gray-900">Sprite Gallery</h2>
-              <span className="text-sm text-gray-400 font-mono px-2 py-0.5 bg-gray-100 rounded">{assets.length} Assets</span>
-            </div>
-
-            {assets.length === 0 && !isGenerating ? (
-              <div className="h-[400px] flex flex-col items-center justify-center text-center space-y-4">
-                <div className="w-20 h-20 rounded-full bg-gray-100 border border-gray-200 flex items-center justify-center">
-                  <Footprints className="text-gray-300" />
+        {/* Live Preview and Review */}
+        <div className="lg:col-span-8 space-y-6">
+          <div className="bg-white rounded-3xl border border-gray-200 overflow-hidden shadow-sm">
+             <div className="border-b border-gray-100 p-6 flex items-center justify-between bg-white">
+                <div className="flex items-center gap-4">
+                   <div className="w-10 h-10 rounded-full bg-amber-50 flex items-center justify-center text-amber-500">
+                      {useMemo(() => {
+                          const icon = ANIMATION_ROWS.find(r => r.state === activeState)?.icon;
+                          return icon ? <icon size={20} /> : <Box size={20} />;
+                      }, [activeState])}
+                   </div>
+                   <div>
+                      <h2 className="text-lg font-bold text-gray-900 capitalize">{activeState.replace(/-/g, ' ')} row</h2>
+                      <p className="text-[10px] text-gray-400 font-mono uppercase tracking-widest">{PET_CONFIG.width}x{PET_CONFIG.height} Alignment Grid</p>
+                   </div>
                 </div>
-                <div className="space-y-1">
-                  <p className="font-medium text-gray-500">Your workshop is empty</p>
-                  <p className="text-sm text-gray-400">Define your character visual to get started.</p>
-                </div>
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <AnimatePresence mode="popLayout">
-                  {isGenerating && (
-                    <motion.div
-                      initial={{ opacity: 0, scale: 0.95 }}
-                      animate={{ opacity: 1, scale: 1 }}
-                      exit={{ opacity: 0, scale: 0.95 }}
-                      className="bg-white p-4 rounded-2xl border border-amber-200 shadow-[0_0_20px_rgba(245,158,11,0.1)] flex flex-col gap-4"
+                {activeRow && (
+                    <button 
+                        onClick={() => {
+                            const n = {...rows};
+                            delete n[activeState];
+                            setRows(n);
+                        }}
+                        className="p-2.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all"
+                        title="Clear current row"
                     >
-                      <div className="aspect-square bg-amber-50/30 rounded-xl animate-pulse flex items-center justify-center">
-                         <Loader2 className="animate-spin text-amber-400 w-10 h-10" />
-                      </div>
-                      <div className="space-y-2">
-                        <div className="h-4 bg-gray-100 rounded w-3/4 animate-pulse" />
-                        <div className="h-3 bg-gray-50 rounded w-1/2 animate-pulse" />
-                      </div>
-                    </motion.div>
-                  )}
-                  {assets.map((asset) => (
-                    <motion.div
-                      layout
-                      key={asset.id}
-                      initial={{ opacity: 0, y: 20 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      className={`bg-white p-4 rounded-2xl border transition-all group flex flex-col gap-4 ${
-                        baseCharacter === asset.imageUrl ? 'border-amber-400 ring-2 ring-amber-100 shadow-lg' : 'border-gray-200 hover:border-amber-200 hover:shadow-md'
-                      }`}
-                    >
-                      <SpritePreview 
-                        imageUrl={asset.imageUrl} 
-                        frameCount={asset.frameCount} 
-                        className="aspect-square w-full"
-                      />
-                      
-                      <div className="space-y-3">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-2">
-                            <span className="px-2 py-0.5 bg-gray-900 text-white text-[10px] font-bold uppercase tracking-wider rounded">
-                              {asset.animationType}
-                            </span>
-                            {baseCharacter === asset.imageUrl && (
-                              <span className="flex items-center gap-1 text-[10px] font-bold text-amber-600 bg-amber-50 px-2 py-0.5 rounded border border-amber-100">
-                                <Check size={10} /> Active Ref
-                              </span>
-                            )}
-                          </div>
-                          <span className="text-[10px] text-gray-400 font-medium">
-                            {asset.style}
-                          </span>
-                        </div>
-                        <p className="text-xs text-gray-500 line-clamp-2 leading-relaxed">
-                          {asset.characterDescription}
-                        </p>
-                      </div>
+                        <Trash2 size={18} />
+                    </button>
+                )}
+             </div>
 
-                      <div className="pt-3 border-t border-gray-100 mt-auto flex items-center justify-between gap-2">
-                        <div className="flex gap-1">
-                          <button 
-                            onClick={() => handleDownload(asset.imageUrl, asset.animationType)}
-                            className="p-2 text-gray-400 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition-colors"
-                            title="Download Sprite Sheet"
-                          >
-                            <Download size={16} />
-                          </button>
-                          {baseCharacter !== asset.imageUrl && (
-                            <button 
-                              onClick={() => {
-                                setBaseCharacter(asset.imageUrl);
-                                setDescription(asset.characterDescription);
-                                setSelectedStyle(asset.style);
-                              }}
-                              className="p-2 text-gray-400 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition-colors"
-                              title="Set as Character Reference"
-                            >
-                              <Lock size={16} />
-                            </button>
-                          )}
+             <div className="p-10 aspect-video bg-[#0f172a] flex items-center justify-center relative group overflow-hidden">
+                {/* Visual context grid */}
+                <div className="absolute inset-0 opacity-10 pointer-events-none" 
+                     style={{ backgroundImage: `linear-gradient(#fff 1px, transparent 1px), linear-gradient(90deg, #fff 1px, transparent 1px)`, backgroundSize: `${PET_CONFIG.width/2}px ${PET_CONFIG.height/2}px` }} />
+
+                <PetPreviewPlayer 
+                  frames={activeRow?.frames || []}
+                  className="w-72 h-72 shadow-2xl bg-transparent relative z-10"
+                />
+                
+                {activeRow && (
+                    <motion.div 
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className="absolute bottom-6 left-1/2 -translate-x-1/2 flex gap-4 px-4 py-2 bg-black/40 backdrop-blur-md rounded-full border border-white/10"
+                    >
+                        <div className="flex items-center gap-1.5">
+                            <div className="w-2 h-2 rounded-full bg-green-500 shadow-[0_0_8px_#22c55e]" />
+                            <span className="text-[10px] text-white font-bold uppercase tracking-wider">Chroma-Key OK</span>
                         </div>
-                        
-                        <button 
-                          onClick={() => setAssets(assets.filter(a => a.id !== asset.id))}
-                          className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
-                          title="Delete Asset"
-                        >
-                          <Trash2 size={16} />
-                        </button>
-                      </div>
+                        <div className="w-[1px] h-3 bg-white/10" />
+                        <div className="flex items-center gap-1.5">
+                            <span className="text-[10px] text-white/60 font-bold uppercase tracking-wider">{PET_CONFIG.count} Frames Aligned</span>
+                        </div>
                     </motion.div>
-                  ))}
-                </AnimatePresence>
-              </div>
-            )}
+                )}
+
+                {!activeRow && !isGenerating && (
+                    <div className="text-center space-y-4 relative z-10">
+                        <div className="w-16 h-16 rounded-full bg-white/5 border border-white/10 mx-auto flex items-center justify-center text-white/20">
+                            <Play size={24} />
+                        </div>
+                        <p className="text-xs text-white/30 font-medium">Click "Generate" to start producing this animation row.</p>
+                    </div>
+                )}
+             </div>
           </div>
+
+          {/* Assembly Section */}
+          <AnimatePresence>
+            {compositeUrl && (
+                <motion.div 
+                    initial={{ opacity: 0, y: 30 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, scale: 0.95 }}
+                    className="bg-white rounded-3xl border-2 border-amber-100 shadow-[0_20px_50px_rgba(0,0,0,0.05)] overflow-hidden"
+                >
+                    <div className="p-8 border-b border-gray-100 flex items-center justify-between">
+                        <div className="flex items-center gap-4">
+                            <div className="w-12 h-12 rounded-2xl bg-amber-500 text-white flex items-center justify-center shadow-lg shadow-amber-200">
+                                <Box size={24} />
+                            </div>
+                            <div>
+                                <h3 className="text-xl font-bold text-gray-900">Project Bundle Export</h3>
+                                <p className="text-xs text-gray-400 mt-0.5">Final spritesheet (1536x1872) and pet.json metadata generated.</p>
+                            </div>
+                        </div>
+                        <button 
+                            onClick={handleDownloadPackage}
+                            className="bg-gray-900 hover:bg-black text-white px-8 py-4 rounded-2xl font-bold flex items-center gap-2 transition-all shadow-xl active:scale-95"
+                        >
+                            <Download size={18} />
+                            Download ZIP Package
+                        </button>
+                    </div>
+
+                    <div className="p-8 bg-gray-50/50">
+                        <div className="bg-white rounded-2xl border border-gray-200 p-2 shadow-inner overflow-auto max-h-[500px] flex justify-center scrollbar-hide">
+                            <img 
+                                src={compositeUrl} 
+                                className="max-w-none w-[768px] pixelated shadow-xl" 
+                                style={{ imageRendering: 'pixelated' }} 
+                            />
+                        </div>
+                    </div>
+                </motion.div>
+            )}
+          </AnimatePresence>
         </div>
       </div>
     </div>

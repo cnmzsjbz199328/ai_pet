@@ -4,61 +4,41 @@
  */
 
 import { GoogleGenAI } from "@google/genai";
-import { AnimationType } from "../types";
+import { AnimationState, PET_CONFIG } from "../types";
+import { buildSpritePrompt } from "./promptBuilder";
+import { generateLayoutGuide } from "./layoutGuide";
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
-const getModel = () => "gemini-3-flash-preview";
-
-export async function generateSpritePrompt(
-  character: string,
-  animation: AnimationType,
+export async function generateSpriteRow(
+  description: string,
+  state: AnimationState,
   style: string,
-  frameCount: number
+  baseImageBase64?: string
 ): Promise<string> {
-  const systemPrompt = `You are a professional game asset technical artist specializing in sprite sheet prompt engineering. 
-Your task is to take a character description and return a high-quality prompt for an image generator (like Imagen) that will produce a perfectly aligned sprite sheet strip.
-
-Constraints to follow for the generated prompt:
-- Always specify a "horizontal sprite sheet strip" or "1x4 row sequence". No grids, just one row.
-- Arrange the animation frames horizontally in one single row from left to right.
-- Character must be perfectly centered in each frame.
-- Facing left strictly (side profile).
-- White or simple flat solid background.
-- No artifacts, no depth of field, no motion blur.
-- Motion must be "in-place" (like on a treadmill).
-- Consistent scale and proportions across all frames.
-
-Input character: ${character}
-Animation: ${animation}
-Style: ${style}
-Frame count: ${frameCount}`;
-
-  const response = await ai.models.generateContent({
-    model: getModel(),
-    contents: [
-      {
-        role: "user",
-        parts: [{ text: systemPrompt + "\nGenerate only the image prompt, no preamble." }],
-      },
-    ],
-  });
-
-  return response.text?.trim() || "";
-}
-
-export async function generateSpriteImage(prompt: string, baseImageBase64?: string): Promise<string> {
-  const parts: any[] = [{ text: prompt }];
+  const prompt = buildSpritePrompt(description, state, style);
+  const layoutGuide = generateLayoutGuide();
+  
+  const parts: any[] = [
+    { text: prompt },
+    {
+      inlineData: {
+        mimeType: "image/png",
+        data: layoutGuide.split(',')[1]
+      }
+    }
+  ];
 
   if (baseImageBase64) {
     const base64Data = baseImageBase64.split(',')[1] || baseImageBase64;
-    parts.unshift({
+    parts.push({
       inlineData: {
         mimeType: "image/png",
         data: base64Data
       }
     });
-    parts[parts.length - 1].text = `REFERENCE IMAGE ATTACHED. ${parts[parts.length - 1].text}. The character in the generated sprite sheet MUST be identical to the one in the reference image. Keep the same colors, clothes, and features precisely.`;
+    const lastPart = parts[0];
+    lastPart.text = `${lastPart.text}\n\nREFERENCE PERSONA ATTACHED: The second image provided is the base character design. The character in this new strip MUST exactly match the features, colors, and clothing of this reference character. Maintain 100% identity consistency.`;
   }
 
   const response = await ai.models.generateContent({
