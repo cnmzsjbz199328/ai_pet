@@ -16,13 +16,14 @@ export interface ProcessedFrame {
  */
 export class ImageProcessor {
   /**
-   * Splits a strip into frames and applies chroma-key transparency.
+   * Splits a strip into frames, applies chroma-key transparency, and performs QA.
    */
-  static async processStrip(stripUrl: string, frameCount: number): Promise<string[]> {
+  static async processStrip(stripUrl: string, frameCount: number): Promise<{frames: string[], isValid: boolean, error?: string}> {
     const img = await this.loadImage(stripUrl);
     const fw = PET_CONFIG.width;
     const fh = PET_CONFIG.height;
     const frames: string[] = [];
+    let allValid = true;
 
     for (let i = 0; i < frameCount; i++) {
         const canvas = document.createElement('canvas');
@@ -33,16 +34,21 @@ export class ImageProcessor {
 
         ctx.drawImage(img, i * fw, 0, fw, fh, 0, 0, fw, fh);
         
-        // Apply Chroma Key
+        // Apply Soft Chroma Key
         this.applyChromaKey(ctx, fw, fh);
         
-        // Potential centroid alignment could go here
-        // For now we trust the guide, but we could compute bounds
+        // Centroid QA check
+        const isValid = this.checkCentroid(ctx, fw, fh);
+        if (!isValid) allValid = false;
         
         frames.push(canvas.toDataURL('image/png'));
     }
 
-    return frames;
+    return { 
+      frames, 
+      isValid: allValid,
+      error: allValid ? undefined : "Centroid alignment check failed: Character might not be centered."
+    };
   }
 
   private static applyChromaKey(ctx: CanvasRenderingContext2D, width: number, height: number) {
@@ -54,14 +60,72 @@ export class ImageProcessor {
       const g = data[i + 1];
       const b = data[i + 2];
 
-      // Green screen detection (range for #00FF00)
-      // Simple logic: if green is significantly higher than r and b
-      if (g > 150 && g > r * 1.4 && g > b * 1.4) {
-        data[i + 3] = 0; // Set alpha to 0
+      // Improved soft green keying
+      // Distance from #00FF00
+      const isGreen = g > 130 && g > r * 1.2 && g > b * 1.2;
+      
+      if (isGreen) {
+        // Simple alpha falloff for antialiasing
+        const maxOther = Math.max(r, b);
+        const diff = g - maxOther;
+        if (diff > 20) {
+            data[i + 3] = Math.max(0, 255 - (diff * 2));
+        }
+        
+        // If it's very green, just kill it
+        if (g > 180 && g > r * 1.8 && g > b * 1.8) {
+            data[i + 3] = 0;
+        }
       }
     }
 
     ctx.putImageData(imageData, 0, 0);
+  }
+
+  private static checkCentroid(ctx: CanvasRenderingContext2D, width: number, height: number): boolean {
+    const data = ctx.getImageData(0, 0, width, height).data;
+    let minX = width, maxX = 0;
+    let hasContent = false;
+
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const alpha = data[(y * width + x) * 4 + 3];
+        if (alpha > 50) {
+          if (x < minX) minX = x;
+          if (x > maxX) maxX = x;
+          hasContent = true;
+        }
+      }
+    }
+
+    if (!hasContent) return false;
+
+    const centerX = (minX + maxX) / 2;
+    const frameCenter = width / 2;
+    
+    // Tolerance: ±25px
+    return Math.abs(centerX - frameCenter) <= 25;
+  }
+
+  /**
+   * Horizontally mirrors a set of frames.
+   */
+  static async mirrorFrames(frames: string[]): Promise<string[]> {
+    const mirrored: string[] = [];
+    for (const frame of frames) {
+      const img = await this.loadImage(frame);
+      const canvas = document.createElement('canvas');
+      canvas.width = img.width;
+      canvas.height = img.height;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) continue;
+      
+      ctx.translate(canvas.width, 0);
+      ctx.scale(-1, 1);
+      ctx.drawImage(img, 0, 0);
+      mirrored.push(canvas.toDataURL('image/png'));
+    }
+    return mirrored;
   }
 
   /**

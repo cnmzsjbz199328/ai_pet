@@ -4,8 +4,9 @@
  */
 
 import { useState, useMemo } from "react";
-import { Sparkles, Play, Sword, Footprints, Box, Coffee, Loader2, Download, Lock, Check, Trash2, RotateCcw, AlertTriangle } from "lucide-react";
+import { Sparkles, Play, Sword, Footprints, Box, Coffee, Loader2, Download, Lock, Check, Trash2, RotateCcw, AlertTriangle, Repeat } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
+import JSZip from "jszip";
 import { AnimationState, PET_CONFIG, SpriteRow } from "../types";
 import { generateSpriteRow } from "../services/geminiService";
 import { ImageProcessor } from "../services/imageProcessor";
@@ -37,6 +38,10 @@ export default function SpriteGenerator() {
 
   const activeRow = useMemo(() => rows[activeState], [rows, activeState]);
 
+  const ActiveIcon = useMemo(() => {
+    return ANIMATION_ROWS.find(r => r.state === activeState)?.icon ?? Box;
+  }, [activeState]);
+
   const handleGenerateRow = async () => {
     if (!description || isGenerating) return;
 
@@ -45,14 +50,15 @@ export default function SpriteGenerator() {
       const baseRow = rows['base'];
       const stripUrl = await generateSpriteRow(description, activeState, selectedStyle, baseRow?.imageUrl);
       
-      // Process strip into frames
-      const frames = await ImageProcessor.processStrip(stripUrl, PET_CONFIG.count);
+      // Process strip into frames with QA
+      const result = await ImageProcessor.processStrip(stripUrl, PET_CONFIG.count);
 
       const newRow: SpriteRow = {
         state: activeState,
         imageUrl: stripUrl,
-        frames: frames,
-        isValid: true
+        frames: result.frames,
+        isValid: result.isValid,
+        error: result.error
       };
 
       setRows(prev => ({ ...prev, [activeState]: newRow }));
@@ -62,6 +68,21 @@ export default function SpriteGenerator() {
     } finally {
       setIsGenerating(false);
     }
+  };
+
+  const handleMirrorRunningLeft = async () => {
+    const rightRow = rows['running-right'];
+    if (!rightRow) return;
+
+    const mirroredFrames = await ImageProcessor.mirrorFrames(rightRow.frames);
+    const newRow: SpriteRow = {
+      state: 'running-left',
+      imageUrl: rightRow.imageUrl, // Link to same original but frames are transformed
+      frames: mirroredFrames,
+      isValid: true
+    };
+    setRows(prev => ({ ...prev, ['running-left']: newRow }));
+    setActiveState('running-left');
   };
 
   const handleAssembleAtlas = async () => {
@@ -78,34 +99,44 @@ export default function SpriteGenerator() {
     }
   };
 
-  const handleDownloadPackage = () => {
+  const handleDownloadPackage = async () => {
     if (!compositeUrl) return;
 
-    // 1. Download Spritesheet
-    const sheetLink = document.createElement("a");
-    sheetLink.href = compositeUrl;
-    sheetLink.download = `${name.replace(/\s+/g, '_') || 'pet'}_spritesheet.webp`;
-    sheetLink.click();
+    const zip = new JSZip();
+    const folder = zip.folder(`pets/${name.replace(/\s+/g, '_') || 'pet'}`);
+    
+    if (!folder) return;
 
-    // 2. Download pet.json
+    // 1. Spritesheet
+    const sheetBase64 = compositeUrl.split(',')[1];
+    folder.file("spritesheet.webp", sheetBase64, { base64: true });
+
+    // 2. pet.json
     const petJson = {
         name: name || "Unnamed Pet",
         frameSize: { width: PET_CONFIG.width, height: PET_CONFIG.height },
-        animations: Object.keys(rows).map(key => ({
+        chromaKey: "#00FF00",
+        fps: 10,
+        animations: Object.keys(rows).map((key, index) => ({
             state: key,
-            frameCount: rows[key].frames.length
+            frameCount: rows[key].frames.length,
+            rowIndex: ['base', 'idle', 'running-right', 'running-left', 'waving', 'jumping', 'failed', 'review', 'sleeping'].indexOf(key),
+            loop: key !== 'hatch' && key !== 'failed',
+            mirrored: key === 'running-left' && rows['running-right']?.imageUrl === rows[key].imageUrl
         }))
     };
-    
-    const blob = new Blob([JSON.stringify(petJson, null, 2)], { type: "application/json" });
-    const jsonLink = document.createElement("a");
-    jsonLink.href = URL.createObjectURL(blob);
-    jsonLink.download = "pet.json";
-    jsonLink.click();
+    folder.file("pet.json", JSON.stringify(petJson, null, 2));
+
+    const content = await zip.generateAsync({ type: "blob" });
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(content);
+    link.download = `${name.replace(/\s+/g, '_') || 'pet'}_package.zip`;
+    link.click();
   };
 
   return (
     <div className="max-w-7xl mx-auto p-6 space-y-8 pb-20">
+      {/* ... header ... */}
       <header className="flex flex-col md:flex-row md:items-center justify-between gap-6 border-b border-gray-100 pb-8">
         <div className="space-y-2">
           <h1 className="text-4xl font-bold tracking-tight text-gray-900 flex items-center gap-3">
@@ -145,7 +176,7 @@ export default function SpriteGenerator() {
       </header>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-        {/* Step-by-Step Configuration */}
+        {/* ... Configuration ... */}
         <div className="lg:col-span-4 space-y-6">
           <div className="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm space-y-6 lg:sticky lg:top-6">
             <div className="space-y-4">
@@ -167,6 +198,7 @@ export default function SpriteGenerator() {
               />
             </div>
 
+            {/* ... Styles ... */}
             <div className="space-y-4">
               <label className="text-xs font-bold uppercase tracking-wider text-gray-400 flex items-center gap-2">
                 <div className="w-1.5 h-1.5 rounded-full bg-amber-500" />
@@ -219,6 +251,16 @@ export default function SpriteGenerator() {
               </div>
             </div>
 
+            {activeState === 'running-left' && rows['running-right'] && !rows['running-left'] && (
+              <button
+                onClick={handleMirrorRunningLeft}
+                className="w-full py-2 bg-amber-50 text-amber-700 font-bold rounded-xl border border-amber-200 flex items-center justify-center gap-2 hover:bg-amber-100 transition-all text-xs"
+              >
+                <Repeat size={14} />
+                Mirror from Running Right?
+              </button>
+            )}
+
             <button
               onClick={handleGenerateRow}
               disabled={!description || isGenerating}
@@ -245,10 +287,7 @@ export default function SpriteGenerator() {
              <div className="border-b border-gray-100 p-6 flex items-center justify-between bg-white">
                 <div className="flex items-center gap-4">
                    <div className="w-10 h-10 rounded-full bg-amber-50 flex items-center justify-center text-amber-500">
-                      {useMemo(() => {
-                          const icon = ANIMATION_ROWS.find(r => r.state === activeState)?.icon;
-                          return icon ? <icon size={20} /> : <Box size={20} />;
-                      }, [activeState])}
+                      <ActiveIcon size={20} />
                    </div>
                    <div>
                       <h2 className="text-lg font-bold text-gray-900 capitalize">{activeState.replace(/-/g, ' ')} row</h2>
@@ -284,16 +323,25 @@ export default function SpriteGenerator() {
                     <motion.div 
                         initial={{ opacity: 0, y: 10 }}
                         animate={{ opacity: 1, y: 0 }}
-                        className="absolute bottom-6 left-1/2 -translate-x-1/2 flex gap-4 px-4 py-2 bg-black/40 backdrop-blur-md rounded-full border border-white/10"
+                        className="absolute bottom-6 left-1/2 -translate-x-1/2 flex flex-col gap-2 pointer-events-none"
                     >
-                        <div className="flex items-center gap-1.5">
-                            <div className="w-2 h-2 rounded-full bg-green-500 shadow-[0_0_8px_#22c55e]" />
-                            <span className="text-[10px] text-white font-bold uppercase tracking-wider">Chroma-Key OK</span>
+                        <div className="flex gap-4 px-4 py-2 bg-black/40 backdrop-blur-md rounded-full border border-white/10">
+                            <div className="flex items-center gap-1.5">
+                                <div className={`w-2 h-2 rounded-full shadow-[0_0_8px_currentColor] ${activeRow.isValid ? 'bg-green-500 text-green-500' : 'bg-red-500 text-red-500'}`} />
+                                <span className={`text-[10px] font-bold uppercase tracking-wider ${activeRow.isValid ? 'text-white' : 'text-red-300'}`}>
+                                    {activeRow.isValid ? 'Centroid OK' : 'Centroid Error'}
+                                </span>
+                            </div>
+                            <div className="w-[1px] h-3 bg-white/10" />
+                            <div className="flex items-center gap-1.5">
+                                <span className="text-[10px] text-white/60 font-bold uppercase tracking-wider">{PET_CONFIG.count} Frames</span>
+                            </div>
                         </div>
-                        <div className="w-[1px] h-3 bg-white/10" />
-                        <div className="flex items-center gap-1.5">
-                            <span className="text-[10px] text-white/60 font-bold uppercase tracking-wider">{PET_CONFIG.count} Frames Aligned</span>
-                        </div>
+                        {activeRow.error && (
+                            <div className="bg-red-500/90 text-white text-[9px] px-3 py-1 rounded text-center font-bold">
+                                {activeRow.error}
+                            </div>
+                        )}
                     </motion.div>
                 )}
 
@@ -308,7 +356,7 @@ export default function SpriteGenerator() {
              </div>
           </div>
 
-          {/* Assembly Section */}
+          {/* ... Assembly ... */}
           <AnimatePresence>
             {compositeUrl && (
                 <motion.div 

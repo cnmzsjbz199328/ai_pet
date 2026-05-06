@@ -17,6 +17,11 @@ const STATE_DESCRIPTIONS: Record<AnimationState, string> = {
   'sleeping': 'Curled up on the ground, slow breathing animation, eyes closed.'
 };
 
+const CODEX_STYLE_RULES = `
+Art style enforcement: compact chibi proportions, chunky readable silhouettes, thick dark 1-2px outlines, visible stepped pixel edges, limited flat palette, cel shading. 
+NO realistic texture, NO soft gradients, NO high-detail antialiasing.
+NO detached sparkles, NO motion trails, NO shadows, NO glows, NO wave marks, NO speed lines, NO dust clouds, NO text, NO chroma-key-adjacent artifacts.`;
+
 export function buildSpritePrompt(
   description: string,
   state: AnimationState,
@@ -31,6 +36,8 @@ export function buildSpritePrompt(
 Character: ${description}
 Action: ${STATE_DESCRIPTIONS[state]}
 Visual Style: ${style}
+
+${CODEX_STYLE_RULES}
 
 Rules (STRICT):
 1. Format: A single horizontal strip with exactly ${n} frames.

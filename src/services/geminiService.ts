@@ -46,7 +46,7 @@ export async function generateSpriteRow(
     contents: [{ parts }],
     config: {
       imageConfig: {
-        aspectRatio: "1:1", 
+        aspectRatio: "21:3", // Approximately 7:1 for 1x8 strip (1536x208)
       },
     },
   });
