@@ -121,7 +121,7 @@ export default function SpriteGenerator() {
             state: key,
             frameCount: rows[key].frames.length,
             rowIndex: ['base', 'idle', 'running-right', 'running-left', 'waving', 'jumping', 'failed', 'review', 'sleeping'].indexOf(key),
-            loop: key !== 'hatch' && key !== 'failed',
+            loop: !['base', 'failed'].includes(key),
             mirrored: key === 'running-left' && rows['running-right']?.imageUrl === rows[key].imageUrl
         }))
     };
@@ -144,8 +144,13 @@ export default function SpriteGenerator() {
         };
         qaFolder.file("review.json", JSON.stringify(qaReport, null, 2));
         
-        // Also include the composite atlas as a contact sheet inside QA
-        const contactBase64 = compositeUrl.split(',')[1];
+        // Generate labeled contact sheet
+        const frameMap: Record<string, string[]> = {};
+        Object.keys(rows).forEach(key => {
+            frameMap[key] = rows[key].frames;
+        });
+        const contactSheetUrl = await ImageProcessor.generateContactSheet(frameMap);
+        const contactBase64 = contactSheetUrl.split(',')[1];
         qaFolder.file("contact-sheet.webp", contactBase64, { base64: true });
     }
 

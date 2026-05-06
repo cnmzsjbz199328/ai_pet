@@ -132,10 +132,10 @@ export class ImageProcessor {
    * Combines frames into a 1536x1872 (8x9) spritesheet.
    */
   static async assembleAtlas(rows: Record<string, string[]>): Promise<string> {
-    const canvas = document.createElement('canvas');
     const columns = 8;
     const rowList = ['base', 'idle', 'running-right', 'running-left', 'waving', 'jumping', 'failed', 'review', 'sleeping'];
     
+    const canvas = document.createElement('canvas');
     canvas.width = columns * PET_CONFIG.width;
     canvas.height = rowList.length * PET_CONFIG.height;
     const ctx = canvas.getContext('2d');
@@ -155,6 +155,54 @@ export class ImageProcessor {
     }
 
     return canvas.toDataURL('image/webp', 0.85);
+  }
+
+  /**
+   * Generates a contact sheet with labels for QA purposes.
+   */
+  static async generateContactSheet(rows: Record<string, string[]>): Promise<string> {
+    const columns = 8;
+    const rowList = ['base', 'idle', 'running-right', 'running-left', 'waving', 'jumping', 'failed', 'review', 'sleeping'];
+    const labelWidth = 150;
+    
+    const canvas = document.createElement('canvas');
+    canvas.width = columns * PET_CONFIG.width + labelWidth;
+    canvas.height = rowList.length * PET_CONFIG.height;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return "";
+
+    // Background
+    ctx.fillStyle = '#1e293b';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    for (let r = 0; r < rowList.length; r++) {
+      const state = rowList[r];
+      const frames = rows[state];
+      
+      // Draw Label
+      ctx.fillStyle = '#64748b';
+      ctx.font = 'bold 16px Inter, sans-serif';
+      ctx.textAlign = 'left';
+      ctx.fillText(state.toUpperCase(), 20, r * PET_CONFIG.height + PET_CONFIG.height / 2);
+      
+      // Separator line
+      ctx.strokeStyle = '#334155';
+      ctx.beginPath();
+      ctx.moveTo(0, (r + 1) * PET_CONFIG.height);
+      ctx.lineTo(canvas.width, (r + 1) * PET_CONFIG.height);
+      ctx.stroke();
+
+      if (!frames) continue;
+
+      for (let c = 0; c < columns; c++) {
+          if (frames[c]) {
+              const img = await this.loadImage(frames[c]);
+              ctx.drawImage(img, labelWidth + c * PET_CONFIG.width, r * PET_CONFIG.height);
+          }
+      }
+    }
+
+    return canvas.toDataURL('image/webp', 0.8);
   }
 
   private static loadImage(url: string): Promise<HTMLImageElement> {

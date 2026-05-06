@@ -44,10 +44,6 @@ export async function generateSpriteRow(
   const response = await ai.models.generateContent({
     model: 'gemini-2.5-flash-image',
     contents: [{ parts }],
-    config: {
-      imageConfig: {
-      },
-    },
   });
 
   for (const part of response.candidates?.[0]?.content?.parts || []) {
