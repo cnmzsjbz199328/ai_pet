@@ -19,15 +19,20 @@ export async function generateSpriteRow(
   const prompt = buildSpritePrompt(description, state, style);
   const layoutGuide = generateLayoutGuide();
   
-  const parts: any[] = [
-    { text: prompt },
-    {
+  const parts: any[] = [{ text: prompt }];
+
+  // Attachment order:
+  // 1. Layout Guide (only for strips)
+  // 2. Persona Reference (if available)
+
+  if (state !== 'base') {
+    parts.push({
       inlineData: {
         mimeType: "image/png",
         data: layoutGuide.split(',')[1]
       }
-    }
-  ];
+    });
+  }
 
   if (baseImageBase64) {
     const base64Data = baseImageBase64.split(',')[1] || baseImageBase64;
@@ -37,8 +42,6 @@ export async function generateSpriteRow(
         data: base64Data
       }
     });
-    const lastPart = parts[0];
-    lastPart.text = `${lastPart.text}\n\nREFERENCE PERSONA ATTACHED: The second image provided is the base character design. The character in this new strip MUST exactly match the features, colors, and clothing of this reference character. Maintain 100% identity consistency.`;
   }
 
   const response = await ai.models.generateContent({

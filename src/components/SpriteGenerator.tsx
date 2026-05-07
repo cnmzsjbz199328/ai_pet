@@ -48,12 +48,16 @@ export default function SpriteGenerator() {
     setIsGenerating(true);
     try {
       const baseRow = rows['base'];
+      const isBase = activeState === 'base';
+      
       // Use the first processed frame as reference instead of the raw strip for better consistency
-      const referenceImage = baseRow?.frames?.[0] || baseRow?.imageUrl;
+      // For the first generation of 'base', there is no reference.
+      const referenceImage = !isBase ? (baseRow?.frames?.[0] || baseRow?.imageUrl) : undefined;
+      
       const stripUrl = await generateSpriteRow(description, activeState, selectedStyle, referenceImage);
       
       // Process strip into frames with QA
-      const result = await ImageProcessor.processStrip(stripUrl, PET_CONFIG.count);
+      const result = await ImageProcessor.processStrip(stripUrl, isBase ? 1 : PET_CONFIG.count, isBase);
 
       const newRow: SpriteRow = {
         state: activeState,
@@ -394,15 +398,15 @@ export default function SpriteGenerator() {
                          <div className="w-1 h-1 rounded-full bg-amber-500" />
                          Stage 2: Fragmented Frames (QA)
                     </h3>
-                    <div className="grid grid-cols-8 gap-2">
+                    <div className="flex gap-2 flex-wrap">
                         {activeRow?.frames ? activeRow.frames.map((f, i) => (
-                           <div key={i} className="aspect-square bg-slate-900 flex items-center justify-center rounded-lg border border-slate-800 overflow-hidden shadow-inner group relative">
+                           <div key={i} className="w-20 h-20 bg-slate-900 flex items-center justify-center rounded-lg border border-slate-800 overflow-hidden shadow-inner group relative">
                                <img src={f} className="w-4/5 h-4/5 object-contain pixelated" style={{ imageRendering: 'pixelated' }} />
                                <div className="absolute inset-x-0 bottom-0 py-0.5 bg-black/60 text-white text-[8px] text-center opacity-0 group-hover:opacity-100 transition-opacity">#{i+1}</div>
                            </div>
                         )) : (
-                            Array.from({length: 8}).map((_, i) => (
-                                <div key={i} className="aspect-square bg-gray-50 rounded-lg border border-dashed border-gray-200 flex items-center justify-center">
+                            Array.from({length: activeState === 'base' ? 1 : 8}).map((_, i) => (
+                                <div key={i} className="w-20 h-20 bg-gray-50 rounded-lg border border-dashed border-gray-200 flex items-center justify-center">
                                     <div className="w-1/3 h-1/3 bg-gray-100 rounded-sm" />
                                 </div>
                             ))

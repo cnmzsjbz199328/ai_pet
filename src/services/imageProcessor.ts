@@ -18,41 +18,71 @@ export class ImageProcessor {
   /**
    * Splits a strip into frames, applies chroma-key transparency, and performs QA.
    */
-  static async processStrip(stripUrl: string, frameCount: number): Promise<{frames: string[], isValid: boolean, error?: string}> {
+  static async processStrip(stripUrl: string, frameCount: number, isBase: boolean = false): Promise<{frames: string[], isValid: boolean, error?: string}> {
     const img = await this.loadImage(stripUrl);
     const fw = PET_CONFIG.width;
     const fh = PET_CONFIG.height;
     const frames: string[] = [];
+
+    // Temporary canvas for global keying
+    const tempCanvas = document.createElement('canvas');
+    tempCanvas.width = img.width;
+    tempCanvas.height = img.height;
+    const tempCtx = tempCanvas.getContext('2d', { willReadFrequently: true });
+    if (!tempCtx) return { frames: [], isValid: false, error: "Canvas context error" };
+    
+    tempCtx.drawImage(img, 0, 0);
+    this.applyChromaKey(tempCtx, img.width, img.height);
+    
+    // Find content blobs along X axis
+    const blobs = this.detectContentBlobs(tempCtx, img.width, img.height, isBase ? 1 : frameCount);
+    
+    const finalFrames: string[] = [];
     let allValid = true;
 
-    // Calculate actual frame dimensions from the source image
-    const actualFw = img.width / frameCount;
-    const actualFh = img.height;
-
-    for (let i = 0; i < frameCount; i++) {
-        const canvas = document.createElement('canvas');
-        canvas.width = fw;
-        canvas.height = fh;
-        const ctx = canvas.getContext('2d');
-        if (!ctx) continue;
-
-        // Scale and draw from source to destination frame
-        ctx.drawImage(img, i * actualFw, 0, actualFw, actualFh, 0, 0, fw, fh);
-        
-        // Apply Soft Chroma Key
-        this.applyChromaKey(ctx, fw, fh);
-        
-        // Centroid QA check
-        const isValid = this.checkCentroid(ctx, fw, fh);
-        if (!isValid) allValid = false;
-        
-        frames.push(canvas.toDataURL('image/png'));
+    // If we can't detect correct number of blobs, fallback to equal spacing but warn
+    if (!isBase && blobs.length !== frameCount) {
+        console.warn(`Extraction Warning: Expected ${frameCount} blobs, detected ${blobs.length}. Falling back to slots.`);
+        const actualSlotW = img.width / frameCount;
+        for (let i = 0; i < frameCount; i++) {
+            const slotCanvas = document.createElement('canvas');
+            slotCanvas.width = fw;
+            slotCanvas.height = fh;
+            const sCtx = slotCanvas.width > 0 ? slotCanvas.getContext('2d') : null;
+            if (sCtx) {
+                sCtx.drawImage(tempCanvas, i * actualSlotW, 0, actualSlotW, img.height, 0, 0, fw, fh);
+                finalFrames.push(slotCanvas.toDataURL('image/png'));
+            }
+        }
+        allValid = false;
+    } else {
+        // Correct blob extraction
+        for (const blob of blobs) {
+            const frameCanvas = document.createElement('canvas');
+            frameCanvas.width = fw;
+            frameCanvas.height = fh;
+            const fCtx = frameCanvas.getContext('2d');
+            if (fCtx) {
+                // Calculate scale to fit in 192x208 with 20px padding
+                const blobW = blob.x2 - blob.x1;
+                const blobH = blob.y2 - blob.y1;
+                const scale = Math.min((fw - 40) / blobW, (fh - 40) / blobH, 1.0);
+                
+                const drawW = blobW * scale;
+                const drawH = blobH * scale;
+                const offsetX = (fw - drawW) / 2;
+                const offsetY = (fh - drawH) / 2;
+                
+                fCtx.drawImage(tempCanvas, blob.x1, blob.y1, blobW, blobH, offsetX, offsetY, drawW, drawH);
+                finalFrames.push(frameCanvas.toDataURL('image/png'));
+            }
+        }
     }
 
     return { 
-      frames, 
+      frames: finalFrames, 
       isValid: allValid,
-      error: allValid ? undefined : "Centroid alignment check failed: Character might not be centered."
+      error: allValid ? undefined : (isBase ? "Base detection failed" : `Blobs out of sequence: Found ${blobs.length}/${frameCount}`)
     };
   }
 
@@ -87,29 +117,53 @@ export class ImageProcessor {
     ctx.putImageData(imageData, 0, 0);
   }
 
-  private static checkCentroid(ctx: CanvasRenderingContext2D, width: number, height: number): boolean {
+  private static detectContentBlobs(ctx: CanvasRenderingContext2D, width: number, height: number, expected: number) {
     const data = ctx.getImageData(0, 0, width, height).data;
-    let minX = width, maxX = 0;
-    let hasContent = false;
-
-    for (let y = 0; y < height; y++) {
-      for (let x = 0; x < width; x++) {
-        const alpha = data[(y * width + x) * 4 + 3];
-        if (alpha > 50) {
-          if (x < minX) minX = x;
-          if (x > maxX) maxX = x;
-          hasContent = true;
+    const colDensity = new Int32Array(width);
+    
+    for (let x = 0; x < width; x++) {
+      for (let y = 0; y < height; y++) {
+        if (data[(y * width + x) * 4 + 3] > 10) {
+            colDensity[x]++;
         }
       }
     }
 
-    if (!hasContent) return false;
+    const intervals: {start: number, end: number}[] = [];
+    let inInterval = false;
+    for (let x = 0; x < width; x++) {
+        if (!inInterval && colDensity[x] > 5) {
+            intervals.push({start: x, end: x});
+            inInterval = true;
+        } else if (inInterval && colDensity[x] <= 5) {
+            intervals[intervals.length - 1].end = x;
+            inInterval = false;
+        }
+    }
 
-    const centerX = (minX + maxX) / 2;
-    const frameCenter = width / 2;
-    
-    // Tolerance: ±25px
-    return Math.abs(centerX - frameCenter) <= 25;
+    // Merge close intervals (less than 10px apart)
+    const merged: {x1: number, y1: number, x2: number, y2: number}[] = [];
+    for (const interval of intervals) {
+        if (merged.length > 0 && interval.start - merged[merged.length-1].x2 < 15) {
+            merged[merged.length-1].x2 = interval.end;
+        } else {
+            merged.push({x1: interval.start, y1: 0, x2: interval.end, y2: height});
+        }
+    }
+
+    // Refine Y bounds for each merged blob
+    return merged.map(blob => {
+        let minY = height, maxY = 0;
+        for (let x = blob.x1; x < blob.x2; x++) {
+            for (let y = 0; y < height; y++) {
+                if (data[(y * width + x) * 4 + 3] > 10) {
+                    if (y < minY) minY = y;
+                    if (y > maxY) maxY = y;
+                }
+            }
+        }
+        return { ...blob, y1: minY, y2: maxY };
+    }).filter(b => (b.x2 - b.x1) > 5 && (b.y2 - b.y1) > 5);
   }
 
   /**

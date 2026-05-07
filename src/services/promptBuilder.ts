@@ -31,23 +31,37 @@ export function buildSpritePrompt(
   const fw = PET_CONFIG.width;
   const fh = PET_CONFIG.height;
 
-  return `Generate a technical 1x${n} sprite strip for a game character.
+  if (state === 'base') {
+    return `Generate a technical character design reference for a game character.
   
 Character: ${description}
-Action: ${STATE_DESCRIPTIONS[state]}
 Visual Style: ${style}
 
 ${CODEX_STYLE_RULES}
 
-Rules (STRICT):
-1. Format: A single horizontal strip with exactly ${n} frames.
-2. Geometry: Each frame is exactly ${fw}x${fh} pixels. Total image size: ${n * fw}x${fh} px.
-3. Alignment: Character MUST be perfectly centered in every frame (+/- 5px). 
-4. Background: Use a FLAT solid #00FF00 (Chroma Key Green) background. No patterns.
-5. In-place Motion: All movement must be "on a treadmill". No horizontal translation.
-6. Side Profile: Left-facing orientation preferred for stability.
-7. Technicality: NO shadows, NO glow, NO particles, NO motion blur, NO visual effects.
-8. Consistency: Identical character proportions and features across all ${n} frames.
+Output Rule (CRITICAL):
+- Output ONE centered full-body sprite pose only.
+- Do NOT draw a strip. 
+- Side profile (facing left).
+- Background: FLAT solid #00FF00.
+- Vertical/Horizontal Centering: Precise.`;
+  }
 
-GUIDE ATTACHED: Follow the provided grid layout as a spatial reference for frame boundaries.`;
+  return `Generate a technical 1x${n} sprite strip for a digital pet.
+  
+Action: ${STATE_DESCRIPTIONS[state]}
+Prompt Context: ${description}
+
+Attached Images Context:
+- Image 1 (GRID): Layout reference guide. Use ONLY for slot count (${n}), centering, and safe padding. Do NOT copy these lines.
+- Image 2 (PERSONA): Identity reference. Lock identity: preserve head shape, markings, palette, and proportions exactly from this character.
+
+Rules (STRICT):
+1. Geometry: Single horizontal strip of ${n} frames. Each slot is ${fw}x${fh}px.
+2. Identity Lock: ${description} features must be 100% consistent with Image 2.
+3. Format: Side profile, facing left.
+4. Motion: "Treadmill" style (in-place). No horizontal drifting.
+5. Background: FLAT solid #00FF00 only.
+
+${CODEX_STYLE_RULES}`;
 }
