@@ -54,15 +54,15 @@ Sequence Action: ${STATE_DESCRIPTIONS[state]}
 Target Identity: ${description}
 
 Attached Data:
-- Image 1 (GRID): Spatial reference. Proves grid alignment for ${n} slots of ${fw}x${fh}px.
-- Image 2 (IDENTITY): Master anchor image. CLONE this character's visual identity exactly. Preserve palette, unique markings, and proportions with 100% fidelity.
+- Image 1 (SLOT TEMPLATE): The template shows exactly ${n} numbered black slots (1–${n}). You MUST place ONE character centered in each slot. ALL ${n} slots MUST be filled. WRONG output: 6 frames. CORRECT output: ${n} frames.
+- Image 2 (IDENTITY): Master identity anchor. CLONE this character exactly. Preserve colors, marking patterns, and proportions with 100% fidelity.
 
 Production Rules (MANDATORY):
-1. Geometry: Single horizontal strip of ${n} frames. Each slot is ${fw}x${fh}px.
-2. Identity Lock: Follow Image 2 exactly. If it has blue spots, the strip MUST have identical blue spots.
-3. Centroid Consistency: Character must stay centered in each slot. NO jumping up/down or horizontal drift unless specified in action.
-4. Format: Side profile, facing left.
-5. Background: FLAT solid #00FF00 only.
+1. Geometry: Single horizontal strip of exactly ${n} frames. Each slot is ${fw}x${fh}px.
+2. Slot Conformity: Sync each character position with the center-crosshairs shown in Image 1.
+3. Identity Lock: Follow Image 2 details exactly. 
+4. Centroid Consistency: Character must stay centered in each slot. NO jumping up/down or horizontal drift.
+5. Background: FLAT solid #00FF00 only. Do NOT use the dark gray from the template.
 
 ${CODEX_STYLE_RULES}`;
 }
