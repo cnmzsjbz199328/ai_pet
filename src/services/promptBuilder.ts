@@ -32,35 +32,36 @@ export function buildSpritePrompt(
   const fh = PET_CONFIG.height;
 
   if (state === 'base') {
-    return `Generate a technical character design reference for a game character.
+    return `Generate a technical character design reference for a digital pet. This is the MASTER ANCHOR for all subsequent animations.
   
 Character: ${description}
 Visual Style: ${style}
 
 ${CODEX_STYLE_RULES}
 
-Output Rule (CRITICAL):
-- Output ONE centered full-body sprite pose only.
-- Do NOT draw a strip. 
+Output Rule (INTERNAL ANCHOR):
+- Output EXACTLY ONE (1) centered full-body sprite pose.
+- This is a SEED frame for identity lock.
+- Do NOT draw a horizontal strip. 
 - Side profile (facing left).
-- Background: FLAT solid #00FF00.
-- Vertical/Horizontal Centering: Precise.`;
+- Background: FLAT solid #00FF00 (Chroma Key).
+- Proportions: Large enough to fill 70% of vertical space, perfectly centered.`;
   }
 
-  return `Generate a technical 1x${n} sprite strip for a digital pet.
+  return `Generate a technical 1x${n} sprite strip for a digital pet animation sequence.
   
-Action: ${STATE_DESCRIPTIONS[state]}
-Prompt Context: ${description}
+Sequence Action: ${STATE_DESCRIPTIONS[state]}
+Target Identity: ${description}
 
-Attached Images Context:
-- Image 1 (GRID): Layout reference guide. Use ONLY for slot count (${n}), centering, and safe padding. Do NOT copy these lines.
-- Image 2 (PERSONA): Identity reference. Lock identity: preserve head shape, markings, palette, and proportions exactly from this character.
+Attached Data:
+- Image 1 (GRID): Spatial reference. Proves grid alignment for ${n} slots of ${fw}x${fh}px.
+- Image 2 (IDENTITY): Master anchor image. CLONE this character's visual identity exactly. Preserve palette, unique markings, and proportions with 100% fidelity.
 
-Rules (STRICT):
+Production Rules (MANDATORY):
 1. Geometry: Single horizontal strip of ${n} frames. Each slot is ${fw}x${fh}px.
-2. Identity Lock: ${description} features must be 100% consistent with Image 2.
-3. Format: Side profile, facing left.
-4. Motion: "Treadmill" style (in-place). No horizontal drifting.
+2. Identity Lock: Follow Image 2 exactly. If it has blue spots, the strip MUST have identical blue spots.
+3. Centroid Consistency: Character must stay centered in each slot. NO jumping up/down or horizontal drift unless specified in action.
+4. Format: Side profile, facing left.
 5. Background: FLAT solid #00FF00 only.
 
 ${CODEX_STYLE_RULES}`;
