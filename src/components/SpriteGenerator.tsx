@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { Sparkles, Play, Sword, Footprints, Box, Coffee, Loader2, Download, Lock, Check, Trash2, RotateCcw, AlertTriangle, Repeat } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import JSZip from "jszip";
@@ -36,27 +36,34 @@ export default function SpriteGenerator() {
   const [rows, setRows] = useState<Record<string, SpriteRow>>({});
   const [compositeUrl, setCompositeUrl] = useState<string | null>(null);
 
+  const hasBase = useMemo(() => !!rows['base'], [rows]);
   const activeRow = useMemo(() => rows[activeState], [rows, activeState]);
 
   const ActiveIcon = useMemo(() => {
     return ANIMATION_ROWS.find(r => r.state === activeState)?.icon ?? Box;
   }, [activeState]);
 
+  // Force active state to base if none exists
+  useEffect(() => {
+    if (!hasBase && activeState !== 'base') {
+      setActiveState('base');
+    }
+  }, [hasBase, activeState]);
+
   const handleGenerateRow = async () => {
     if (!description || isGenerating) return;
 
     setIsGenerating(true);
     try {
-      const baseRow = rows['base'];
       const isBase = activeState === 'base';
+      const baseRow = rows['base'];
       
-      // Use the first processed frame as reference instead of the raw strip for better consistency
-      // For the first generation of 'base', there is no reference.
+      // Use processed frame as reference. For base itself, no reference.
       const referenceImage = !isBase ? (baseRow?.frames?.[0] || baseRow?.imageUrl) : undefined;
       
       const stripUrl = await generateSpriteRow(description, activeState, selectedStyle, referenceImage);
       
-      // Process strip into frames with QA
+      // Process strip into frames with QA logic
       const result = await ImageProcessor.processStrip(stripUrl, isBase ? 1 : PET_CONFIG.count, isBase);
 
       const newRow: SpriteRow = {
@@ -68,9 +75,11 @@ export default function SpriteGenerator() {
       };
 
       setRows(prev => ({ ...prev, [activeState]: newRow }));
+      
+      // If we just generated base, keep user on base but unlock everything
     } catch (error) {
       console.error("Generation failed:", error);
-      alert("Failed to generate row. Try again or check the documentation.");
+      alert("Failed to generate row. AI may have rejected the instruction or quota limit hit.");
     } finally {
       setIsGenerating(false);
     }
@@ -228,7 +237,7 @@ export default function SpriteGenerator() {
       </header>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-        {/* ... Configuration ... */}
+        {/* Step-by-Step Configuration */}
         <div className="lg:col-span-4 space-y-6">
           <div className="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm space-y-6 lg:sticky lg:top-6">
             <div className="space-y-4">
@@ -245,59 +254,72 @@ export default function SpriteGenerator() {
                <textarea
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
-                placeholder="Visual description (e.g. A neon blue jelly blob with tiny wings...)"
-                className="w-full h-28 p-4 bg-gray-50 border border-gray-100 rounded-xl focus:ring-2 focus:ring-amber-500 transition-all outline-none resize-none text-sm placeholder:text-gray-300"
+                placeholder="Visual description (e.g. A neon blue jelly blob...)"
+                className="w-full h-24 p-4 bg-gray-50 border border-gray-100 rounded-xl focus:ring-2 focus:ring-amber-500 transition-all outline-none resize-none text-sm placeholder:text-gray-300"
               />
             </div>
 
-            {/* ... Styles ... */}
-            <div className="space-y-4">
-              <label className="text-xs font-bold uppercase tracking-wider text-gray-400 flex items-center gap-2">
-                <div className="w-1.5 h-1.5 rounded-full bg-amber-500" />
-                Production Style
-              </label>
-              <div className="grid grid-cols-2 gap-2">
-                {STYLES.map((style) => (
-                  <button
-                    key={style}
-                    onClick={() => setSelectedStyle(style)}
-                    className={`px-3 py-2 text-xs rounded-lg border transition-all ${
-                      selectedStyle === style
-                        ? "bg-amber-50 border-amber-300 text-amber-900 font-bold"
-                        : "bg-white border-gray-100 text-gray-400 hover:border-amber-200"
-                    }`}
-                  >
-                    {style}
-                  </button>
-                ))}
-              </div>
-            </div>
-
+            {/* Production Anchor: Base Character */}
             <div className="space-y-3">
               <label className="text-xs font-bold uppercase tracking-wider text-gray-400 flex items-center gap-2">
                 <div className="w-1.5 h-1.5 rounded-full bg-amber-500" />
-                Select Frame Row
+                Master Identity (Anchor)
               </label>
-              <div className="grid grid-cols-1 gap-2 max-h-[300px] overflow-y-auto pr-1 custom-scrollbar">
-                {ANIMATION_ROWS.map(({ state, label, icon: Icon }) => (
+              <button
+                onClick={() => setActiveState('base')}
+                className={`w-full flex items-center gap-4 p-3 rounded-xl border transition-all ${
+                  activeState === 'base'
+                    ? "bg-amber-500 border-amber-500 text-white shadow-lg"
+                    : "bg-white border-gray-200 text-gray-900"
+                }`}
+              >
+                <div className={`w-12 h-12 rounded-lg flex items-center justify-center overflow-hidden ${activeState === 'base' ? 'bg-amber-400' : 'bg-gray-100'}`}>
+                   {rows['base']?.frames[0] ? (
+                     <img src={rows['base'].frames[0]} className="w-full h-full object-contain pixelated" />
+                   ) : (
+                     <Box size={20} className={activeState === 'base' ? 'text-white' : 'text-gray-300'} />
+                   )}
+                </div>
+                <div className="flex-1 text-left">
+                   <p className="text-xs font-bold uppercase tracking-tight">Base Design</p>
+                   <p className={`text-[10px] ${activeState === 'base' ? 'text-amber-100' : 'text-gray-400'}`}>
+                      {rows['base'] ? (rows['base'].isValid ? 'Identity Locked' : 'Needs Review') : 'Requires Generation'}
+                   </p>
+                </div>
+                {rows['base']?.isValid && <Check size={14} className={activeState === 'base' ? 'text-white' : 'text-green-500'} />}
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-bold uppercase tracking-wider text-gray-400 flex items-center gap-2">
+                  <div className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                  Animation Sequences
+                </label>
+                {!hasBase && <span className="text-[9px] font-black bg-gray-100 text-gray-400 px-1.5 py-0.5 rounded">LOCKED</span>}
+              </div>
+              <div className={`grid grid-cols-1 gap-2 max-h-[260px] overflow-y-auto pr-1 custom-scrollbar ${!hasBase ? 'opacity-30 grayscale pointer-events-none' : ''}`}>
+                {ANIMATION_ROWS.filter(r => r.state !== 'base').map(({ state, label, icon: Icon }) => (
                   <button
                     key={state}
                     onClick={() => setActiveState(state)}
                     className={`flex items-center justify-between p-3 rounded-xl border transition-all ${
                       activeState === state
-                        ? "bg-amber-500 border-amber-500 text-white shadow-md"
+                        ? "bg-amber-600 border-amber-600 text-white shadow-md"
                         : "bg-white border-gray-100 text-gray-500 hover:bg-gray-50 hover:border-amber-100"
                     }`}
                   >
                     <div className="flex items-center gap-3">
-                        <Icon size={14} className={activeState === state ? "text-amber-100" : "text-gray-300"} />
-                        <span className="text-xs font-bold">{label}</span>
+                        <Icon size={14} className={activeState === state ? "text-amber-200" : "text-gray-300"} />
+                        <span className="text-xs font-bold">{label.split('. ')[1]}</span>
                     </div>
-                    {rows[state] && (
-                        <div className={`p-1 rounded-full ${activeState === state ? 'bg-amber-400' : 'bg-amber-50'}`}>
-                            <Check size={10} className={activeState === state ? "text-white" : "text-amber-500"} />
+                    <div className="flex items-center gap-2">
+                      {rows[state] && (
+                        <div className={`p-1 rounded-full ${activeState === state ? 'bg-amber-500' : 'bg-green-50'}`}>
+                            <Check size={10} className={activeState === state ? "text-white" : "text-green-600"} />
                         </div>
-                    )}
+                      )}
+                    </div>
                   </button>
                 ))}
               </div>
@@ -315,18 +337,18 @@ export default function SpriteGenerator() {
 
             <button
               onClick={handleGenerateRow}
-              disabled={!description || isGenerating}
+              disabled={!description || isGenerating || (!hasBase && activeState !== 'base')}
               className="w-full py-4 bg-gray-900 text-white font-bold rounded-xl shadow-lg border border-gray-800 flex items-center justify-center gap-3 hover:bg-black disabled:bg-gray-50 disabled:text-gray-300 transition-all active:scale-[0.98]"
             >
               {isGenerating ? (
                 <>
                   <Loader2 className="animate-spin" size={18} />
-                  Drawing Row...
+                  Drawing {activeState}...
                 </>
               ) : (
                 <>
                   <Sparkles size={18} />
-                  {rows[activeState] ? "Redraw Row" : `Generate ${activeState}`}
+                  {activeState === 'base' ? (rows['base'] ? "Redraw Identity" : "Hatch Base Character") : `Generate ${activeState.replace('-', ' ')}`}
                 </>
               )}
             </button>
